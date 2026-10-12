@@ -3,13 +3,17 @@ export const DEFAULT_BASE_URL = 'https://api.messagingme.app';
 // ---------------------------------------------------------------------------------------------------------------------
 // Les erreurs.
 // ---------------------------------------------------------------------------------------------------------------------
-/** Une réponse hors 2xx. `code` est `null` sur une panne générique (JSON illisible, erreur interne, réponse non JSON). */
+/**
+ * Une réponse hors 2xx. `code` est `null` quand la réponse n'est pas un JSON de l'API : la page d'erreur générique qui
+ * remplace parfois un 5xx en chemin. Toute réponse d'erreur JSON de `/v1` porte un `code`.
+ */
 export class ApiError extends Error {
     status;
     code;
     retryAfter;
     upgradeUrl;
     body;
+    metaCode;
     name = 'ApiError';
     constructor(status, code, message, 
     /** Secondes à attendre avant de réessayer (`Retry-After`), sur un 429 surtout ; `null` si l'API ne le dit pas. */
@@ -17,13 +21,16 @@ export class ApiError extends Error {
     /** Sur un 402 : la page où l'offre se change. */
     upgradeUrl, 
     /** Le corps reçu, tel quel (l'objet JSON, ou le texte s'il n'en était pas un). */
-    body) {
+    body, 
+    /** Sur `meta_rejected` : le numéro d'erreur de Meta (131047…), `null` s'il n'en donne pas ou sur un autre code. */
+    metaCode = null) {
         super(message);
         this.status = status;
         this.code = code;
         this.retryAfter = retryAfter;
         this.upgradeUrl = upgradeUrl;
         this.body = body;
+        this.metaCode = metaCode;
     }
 }
 /** `Retry-After` en secondes : un nombre, ou une date HTTP. */
@@ -45,7 +52,7 @@ async function erreurDe(res) {
     catch { /* le texte tel quel */ }
     const objet = typeof corps === 'object' && corps !== null ? corps : null;
     const message = typeof objet?.error === 'string' ? objet.error : `HTTP ${res.status}${texte !== '' && objet === null ? ` : ${texte.slice(0, 200)}` : ''}`;
-    return new ApiError(res.status, typeof objet?.code === 'string' ? objet.code : null, message, secondesAAttendre(res.headers.get('retry-after'), Date.now()), typeof objet?.upgradeUrl === 'string' ? objet.upgradeUrl : null, corps);
+    return new ApiError(res.status, typeof objet?.code === 'string' ? objet.code : null, message, secondesAAttendre(res.headers.get('retry-after'), Date.now()), typeof objet?.upgradeUrl === 'string' ? objet.upgradeUrl : null, corps, typeof objet?.metaCode === 'number' ? objet.metaCode : null);
 }
 /** `/v1/contacts/{contactId}` et `{ contactId }` : chaque paramètre encodé, un paramètre manquant est une erreur. */
 function remplirChemin(chemin, params) {
